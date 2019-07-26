@@ -1,5 +1,8 @@
 package com.jasonz.cordova.bugly;
 
+import android.view.View;
+import android.webkit.WebSettings;
+import com.tencent.bugly.crashreport.crash.h5.H5JavaScriptInterface;
 import org.apache.cordova.BuildConfig;
 import org.apache.cordova.CallbackContext;
 import org.apache.cordova.CordovaArgs;
@@ -9,6 +12,7 @@ import org.apache.cordova.CordovaWebView;
 
 import android.util.Log;
 import android.webkit.WebView;
+import org.crosswalk.engine.XWalkCordovaView;
 import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
@@ -17,6 +21,7 @@ import android.app.Application;
 
 import com.tencent.bugly.crashreport.CrashReport;
 import com.tencent.bugly.crashreport.CrashReport.UserStrategy;
+import org.xwalk.core.XWalkSettings;
 
 public class CDVBugly extends CordovaPlugin {
     public static final String TAG = "Cordova.Plugin.Bugly";
@@ -27,27 +32,27 @@ public class CDVBugly extends CordovaPlugin {
     @Override
     public void initialize(CordovaInterface cordova, CordovaWebView webView) {
         super.initialize(cordova, webView);
-        APP_ID = webView.getPreferences().getString(BUGLY_APP_ID,"");
+        APP_ID = webView.getPreferences().getString(BUGLY_APP_ID, "");
     }
 
     @Override
     public boolean execute(String action, CordovaArgs args, CallbackContext callbackContext) throws JSONException {
 
-        if(action.equals("initSDK")) {
+        if (action.equals("initSDK")) {
             return this.initSDK(args, callbackContext);
-        } else if (action.equals("enableJSMonitor")){
+        } else if (action.equals("enableJSMonitor")) {
             return this.enableJSMonitor(args, callbackContext);
-        } else if (action.equals("setTagID")){
+        } else if (action.equals("setTagID")) {
             return this.setTagID(args, callbackContext);
-        } else if (action.equals("setUserID")){
+        } else if (action.equals("setUserID")) {
             return this.setUserID(args, callbackContext);
-        } else if (action.equals("putUserData")){
+        } else if (action.equals("putUserData")) {
             return this.putUserData(args, callbackContext);
-        } else if (action.equals("testJavaCrash")){
+        } else if (action.equals("testJavaCrash")) {
             return this.testJavaCrash(args, callbackContext);
-        } else if (action.equals("testNativeCrash")){
+        } else if (action.equals("testNativeCrash")) {
             return this.testNativeCrash(args, callbackContext);
-        } else if (action.equals("testANRCrash")){
+        } else if (action.equals("testANRCrash")) {
             return this.testANRCrash(args, callbackContext);
         }
 
@@ -62,33 +67,33 @@ public class CDVBugly extends CordovaPlugin {
             //TODO check param format
             UserStrategy strategy = new UserStrategy(this.cordova.getActivity().getApplicationContext());
 
-            if(params.has("channel")) {
+            if (params.has("channel")) {
                 strategy.setAppChannel(params.getString("channel"));
             }
-            if(params.has("version")) {
+            if (params.has("version")) {
                 strategy.setAppVersion(params.getString("version"));
             }
-            if(params.has("package")) {
+            if (params.has("package")) {
                 strategy.setAppPackageName(params.getString("package"));
             }
-            if(params.has("delay")) {
+            if (params.has("delay")) {
                 strategy.setAppReportDelay(params.getInt("delay"));
             }
-            if(params.has("develop")) {
-                CrashReport.setIsDevelopmentDevice(this.cordova.getActivity().getApplicationContext(),params.getBoolean("develop"));
+            if (params.has("develop")) {
+                CrashReport.setIsDevelopmentDevice(this.cordova.getActivity().getApplicationContext(), params.getBoolean("develop"));
             } else {
                 CrashReport.setIsDevelopmentDevice(this.cordova.getActivity().getApplicationContext(), BuildConfig.DEBUG);
             }
 
             boolean debugModel;
 
-            if(params.has("debug")) {
+            if (params.has("debug")) {
                 debugModel = params.getBoolean("debug");
             } else {
                 debugModel = BuildConfig.DEBUG;
             }
 
-            CrashReport.initCrashReport(this.cordova.getActivity().getApplicationContext(),APP_ID,debugModel,strategy);
+            CrashReport.initCrashReport(this.cordova.getActivity().getApplicationContext(), APP_ID, debugModel, strategy);
         } catch (JSONException e) {
             callbackContext.error(ERROR_INVALID_PARAMETERS);
             return true;
@@ -103,11 +108,79 @@ public class CDVBugly extends CordovaPlugin {
         this.cordova.getActivity().runOnUiThread(new Runnable() {
             @Override
             public void run() {
-                CrashReport.setJavascriptMonitor((WebView)webView.getView(), true);
+                try {
+                    View view = webView.getEngine().getView();
+                    if (view instanceof XWalkCordovaView) {//如果使用了非Android官方的WebView（例如使用 X5或crosswalk）
+                        CrashReport.setJavascriptMonitor(webViewInterface((XWalkCordovaView) webView.getEngine().getView()), true);
+                    } else {
+                        CrashReport.setJavascriptMonitor((WebView) webView.getView(), true);
+                    }
+                } catch (Exception e) {
+                    CrashReport.postCatchedException(e);//手动上报异常
+                    callbackContext.error(e.getMessage());
+                }
             }
         });
         callbackContext.success();
         return true;
+    }
+
+    private CrashReport.WebViewInterface webViewInterface(XWalkCordovaView xWalkCordovaView) {
+        CrashReport.WebViewInterface webView = new CrashReport.WebViewInterface() {
+            /**
+             * 获取WebView URL.
+             *
+             * @return WebView URL
+             */
+            @Override
+            public String getUrl() {
+                return xWalkCordovaView.getUrl();
+            }
+
+            /**
+             * 开启JavaScript.
+             *
+             * @param flag true表示开启，false表示关闭
+             */
+            @Override
+            public void setJavaScriptEnabled(boolean flag) {
+                XWalkSettings webSettings = xWalkCordovaView.getSettings();
+                webSettings.setJavaScriptEnabled(flag);
+            }
+
+            /**
+             * 加载URL.
+             *
+             * @param url 要加载的URL
+             */
+            @Override
+            public void loadUrl(String url) {
+                xWalkCordovaView.loadUrl(url);
+            }
+
+            /**
+             * 添加JavaScript接口对象.
+             *
+             * @param jsInterface JavaScript接口对象
+             * @param name JavaScript接口对象名称
+             */
+            @Override
+            public void addJavascriptInterface(H5JavaScriptInterface jsInterface, String name) {
+                xWalkCordovaView.addJavascriptInterface(jsInterface, name);
+            }
+
+            /**
+             * 获取WebView的内容描述.
+             *
+             * @return WebView的内容描述.
+             */
+            @Override
+            public CharSequence getContentDescription() {
+                return xWalkCordovaView.getContentDescription();
+            }
+        };
+
+        return webView;
     }
 
     private boolean setTagID(CordovaArgs args, CallbackContext callbackContext) {
@@ -122,10 +195,11 @@ public class CDVBugly extends CordovaPlugin {
         return true;
     }
 
-     private boolean setUserID(CordovaArgs args, CallbackContext callbackContext) {
+    private boolean setUserID(CordovaArgs args, CallbackContext callbackContext) {
         try {
-            int id = args.getInt(0);
-            CrashReport.setUserID(this.cordova.getActivity().getApplicationContext(), id);
+//            int id = args.getInt(0);
+            String id = args.getString(0);
+            CrashReport.setUserId(this.cordova.getActivity().getApplicationContext(), id);
         } catch (JSONException e) {
             callbackContext.error(ERROR_INVALID_PARAMETERS);
             return true;
